@@ -1,0 +1,40 @@
+{
+  "manifest_version": 2,
+  "version": "1.4.0",
+  "name": "人物称呼与别名注入",
+  "description": "把人物画像的称呼与别名注入 Maisaka planner，并可用画像称呼替换运行时显示的 QQ 昵称",
+  "author": {
+    "name": "Elmeir",
+    "url": "https://github.com/Elmeir"
+  },
+  "license": "GPL-v3.0-or-later",
+  "urls": {
+    "repository": "https://github.com/Elmeir/maibot-plugin-person-alias",
+    "homepage": "https://github.com/Elmeir/maibot-plugin-person-alias",
+    "documentation": "https://github.com/Elmeir/maibot-plugin-person-alias#readme",
+    "issues": "https://github.com/Elmeir/maibot-plugin-person-alias/issues"
+  },
+  "changelog": "CHANGELOG.md",
+  "host_application": {
+    "min_version": "1.2.0",
+    "max_version": "1.2.99"
+  },
+  "sdk": {
+    "min_version": "2.0.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": [
+    "person.get_id",
+    "person.get_id_by_name",
+    "person.get_value",
+    "config.get"
+  ],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": [
+      "zh-CN"
+    ]
+  },
+  "id": "local.person-profile-name-alias"
+}
