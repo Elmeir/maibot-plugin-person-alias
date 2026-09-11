@@ -14,7 +14,12 @@ import types
 from pathlib import Path
 
 _argv_repo = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("MAIBOT_REPO", "")
-REPO = Path(_argv_repo).expanduser().resolve() if _argv_repo else Path(r"C:\Users\1\WorkBuddy\2026-09-10-20-12-56\_repo\MaiBot")
+if _argv_repo:
+    REPO = Path(_argv_repo).expanduser().resolve()
+else:
+    REPO = Path.cwd()
+    print("[提示] 未指定 MaiBot 仓库根目录（位置参数或环境变量 MAIBOT_REPO），"
+          "使用当前目录——依赖宿主源码的校验项可能跳过")
 PLUGIN_DIR = Path(__file__).resolve().parent / "person_profile_name_alias"
 if not PLUGIN_DIR.is_dir():
     PLUGIN_DIR = REPO / "plugins" / "person_profile_name_alias"

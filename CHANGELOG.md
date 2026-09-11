@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.1] - 2026-09-11
+
+### 规范符合性修复
+
+- manifest：`host_application.min_version` 从 1.2.0 抬到 **1.2.4**——插件挂载的
+  `chat.receive.after_process` 钩点在 1.2.0~1.2.3 上不存在（钩点缺失 = 注册直接失败）；
+  `max_version` 对齐统一模板改为 1.99.99。
+- manifest：`license` 改为标准 SPDX 写法 `GPL-3.0-or-later`（原 `GPL-v3.0-or-later`
+  非规范标识，README/LICENSE 均为 GPL-3.0）。
+- `config_version` 字段补 `hidden/disabled`（用户不可改），默认值改由
+  `SUPPORTED_CONFIG_VERSION` 常量提供，与其他插件一致。
+- verify_plugin.py 移除硬编码的本机兜底路径，未指定仓库时使用当前目录并提示。
+
 ## [1.4.0] - 2026-09-10
 
 ### 可观测性：补齐静默失败的诊断盲区

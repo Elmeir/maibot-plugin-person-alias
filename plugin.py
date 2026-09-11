@@ -43,6 +43,9 @@ from maibot_sdk.types import (
 MAX_RECORDED_PEOPLE = 8
 """单次消息最多记录的人物数量。"""
 
+SUPPORTED_CONFIG_VERSION = "1.0.0"
+"""插件支持的配置版本（config_version 字段默认值，宿主据此触发字段级迁移）。"""
+
 FALLBACK_WINDOW_SECONDS = 45
 """会话 ID 对不上时，允许回退到最近一次记录的时间窗口（避免跨群串味）。"""
 
@@ -181,9 +184,9 @@ class PluginSectionConfig(PluginConfigBase):
         json_schema_extra=_ui_meta("启用插件", "关闭后注入与昵称替换都不会执行"),
     )
     config_version: str = Field(
-        default="1.0.0",
+        default=SUPPORTED_CONFIG_VERSION,
         description="配置版本",
-        json_schema_extra=_ui_meta("配置版本", "插件自动维护，一般不需要修改"),
+        json_schema_extra=_ui_meta("配置版本", "插件自动维护，一般不需要修改", hidden=True, disabled=True),
     )
 
 

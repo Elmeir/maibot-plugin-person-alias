@@ -6,7 +6,7 @@
 2. **换名**：把运行时显示的 **QQ 昵称 / 群名片**替换成你自己维护的称呼，planner、回复器、日志、WebUI 监控面板看到的名字就都统一了。
 
 - 插件 ID：`github.elmeir.person-profile-name-alias`
-- 宿主要求：MaiBot 1.2.x（maibot-plugin-sdk ≥ 2.0）
+- 宿主要求：MaiBot ≥ 1.2.4（maibot-plugin-sdk ≥ 2.0）
 - 依赖：无
 - 作者：[Elmeir](https://github.com/Elmeir) ｜ License：GPL-3.0-or-later
 - 版本：见 [_manifest.json](_manifest.json)，变更见 [CHANGELOG.md](CHANGELOG.md)
