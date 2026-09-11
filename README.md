@@ -5,28 +5,24 @@
 1. **注入**：把「主称呼 + 别名」（含 WebUI 里维护的人工别名）注入 Maisaka planner 上下文，让麦麦知道当前在说谁。
 2. **换名**：把运行时显示的 **QQ 昵称 / 群名片**替换成你自己维护的称呼，planner、回复器、日志、WebUI 监控面板看到的名字就都统一了。
 
+- 插件 ID：`github.elmeir.person-profile-name-alias`
+- 宿主要求：MaiBot 1.2.x（maibot-plugin-sdk ≥ 2.0）
+- 依赖：无
+- 作者：[Elmeir](https://github.com/Elmeir) ｜ License：GPL-3.0-or-later
+- 版本：见 [_manifest.json](_manifest.json)，变更见 [CHANGELOG.md](CHANGELOG.md)
+
 ## 安装
 
 ```bash
 cd /你的部署目录/plugins    # 例如 /opt/MaiBot/plugins
-git clone https://github.com/Elmeir/maibot-plugin-person-alias.git person_profile_name_alias
+git clone https://github.com/Elmeir/maibot-plugin-person-alias.git
 # 重启麦麦（systemctl restart xxx / docker compose restart / 重启 bot.py）
 ```
 
-> 目录名必须保持 `person_profile_name_alias`：插件配置存在插件目录内的 `config.toml`，
-> 换目录名会丢配置。
+> 插件配置存在插件目录内的 `config.toml`，**换目录名会丢配置**：从旧目录名
+> `person_profile_name_alias` 升级的用户保持原目录名继续用即可，无需改名。
 
-更新：`cd plugins/person_profile_name_alias && git pull` 后重启。
-
-### 自检（可选）
-
-```bash
-python verify_plugin.py /你的MaiBot仓库根     # 例如 python verify_plugin.py /opt/MaiBot
-```
-
-不联网也能跑：它用假宿主把插件加载一遍，覆盖注入、换名、配置迁移等全部路径。
-
-重启后到 WebUI 插件页找到「人物称呼与别名注入」并启用，配置项都在插件面板里。配置项都有中文标题与说明，其中「生效范围」「名字来源」是**下拉框**，直接选就行。
+更新：`cd plugins/maibot-plugin-person-alias && git pull` 后重启。重启后到 WebUI 插件页找到「人物称呼与别名注入」并启用，配置项都在插件面板里（均有中文标题与说明，「生效范围」「名字来源」是**下拉框**，直接选就行）。
 
 ## 换名怎么配（「昵称替换」配置段）
 
@@ -75,7 +71,7 @@ python verify_plugin.py /你的MaiBot仓库根     # 例如 python verify_plugin
 
 ```bash
 pip install maibot-plugin-sdk
-MAIBOT_REPO=/opt/MaiBot python verify_plugin.py
+python verify_plugin.py /你的MaiBot仓库根     # 例如 python verify_plugin.py /opt/MaiBot
 ```
 
-会校验 manifest 合法性、组件声明、注入条目能被宿主协议反序列化、**换名后的消息能否被宿主保真反序列化**（含图片二进制），以及**身份解析不会按群名片猜人**。
+不联网也能跑（用假宿主把插件完整加载一遍），会校验 manifest 合法性、组件声明、注入条目能被宿主协议反序列化、**换名后的消息能否被宿主保真反序列化**（含图片二进制），以及**身份解析不会按群名片猜人**。仓库根目录也可以用环境变量 `MAIBOT_REPO` 指定。
