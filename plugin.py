@@ -31,13 +31,11 @@ from typing import Any, Literal
 
 from pydantic import field_validator
 
-from maibot_sdk import Field, HookHandler, MaiBotPlugin, PluginConfigBase, Tool
+from maibot_sdk import Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import (
     ErrorPolicy,
     HookMode,
     HookOrder,
-    ToolParameterInfo,
-    ToolParamType,
 )
 
 MAX_RECORDED_PEOPLE = 8
@@ -225,15 +223,6 @@ class InjectionConfig(PluginConfigBase):
         ge=0,
         description="人物信息缓存时长（秒）",
         json_schema_extra=_ui_meta("人物信息缓存（秒）", "缓存人物档案查询结果，减少重复查询"),
-    )
-    allow_name_lookup: bool = Field(
-        default=False,
-        description="拿不到 QQ 号时，是否允许按名称反查身份（不推荐）",
-        json_schema_extra=_ui_meta(
-            "允许按名称反查身份（不推荐）",
-            "默认关闭。身份一律用 QQ 号（platform + user_id）解析；群名片可由本人随意修改，"
-            "开启后改名就能顶替他人，可能把 A 认成 B。仅在确实拿不到 QQ 号且确认无重名时开启",
-        ),
     )
     title: str = Field(
         default="【人物称呼与别名-内部参考】",
@@ -811,28 +800,15 @@ class PersonNameAliasPlugin(MaiBotPlugin):
         self._person_cache[person_id] = (time.time(), payload)
         return value
 
-    def _allow_name_lookup(self) -> bool:
-        """是否允许按名称反查身份（默认关闭）。"""
-
-        return bool(self._opt("injection", "allow_name_lookup", False))
-
-    @staticmethod
-    def _looks_like_person_id(token: str) -> bool:
-        """person_id 是 platform_user_id 的 md5（32 位十六进制）。"""
-
-        return bool(re.fullmatch(r"[0-9a-fA-F]{32}", token or ""))
-
-    async def _resolve_person_id(self, person: dict[str, str], allow_name_lookup: bool = False) -> str:
+    async def _resolve_person_id(self, person: dict[str, str]) -> str:
         """把 platform + user_id 解析成内部 person_id。
 
-        身份只认 platform + user_id（QQ 号）。按名称反查默认关闭：`person.get_id_by_name`
-        匹配的是人物主档案的 person_name，而调用方手里的"名称"通常是群名片/QQ 昵称——
-        群名片由用户自己填写，改个名字就能指向别人，用它认人会认错对象。
+        身份只认 platform + user_id（QQ 号）：群名片/QQ 昵称由本人随意修改，
+        按名称反查会认错对象，因此不做任何名称兜底。
         """
 
         platform = str(person.get("platform") or "").strip()
         user_id = str(person.get("user_id") or "").strip()
-        name = str(person.get("name") or "").strip()
 
         if platform and user_id:
             try:
@@ -844,23 +820,9 @@ class PersonNameAliasPlugin(MaiBotPlugin):
             except Exception as exc:
                 self._log_debug(f"person.get_id 失败: {platform}:{user_id} err={exc}")
 
-        # 拿不到 QQ 号时不再默认按名字猜人；只有显式开启才允许，且仅用于查询展示。
-        if not user_id and name and (allow_name_lookup or self._allow_name_lookup()):
-            try:
-                reply = await self.ctx.person.get_id_by_name(name)
-                if isinstance(reply, dict) and reply.get("success", True):
-                    person_id = str(reply.get("person_id") or "").strip()
-                    if person_id:
-                        self._log_debug(f"按名称反查命中: {name!r} -> {person_id}")
-                        return person_id
-            except Exception as exc:
-                self._log_debug(f"person.get_id_by_name 失败: {name!r} err={exc}")
-
         return ""
 
-    async def _describe_person(
-        self, person: dict[str, str], allow_name_lookup: bool = False
-    ) -> dict[str, Any] | None:
+    async def _describe_person(self, person: dict[str, str]) -> dict[str, Any] | None:
         """汇总单个人物的称呼与别名。
 
         传入 `person["person_id"]` 时直接使用，不再做任何反查。
@@ -869,7 +831,7 @@ class PersonNameAliasPlugin(MaiBotPlugin):
         fallback_name = str(person.get("name") or "").strip()
         person_id = str(person.get("person_id") or "").strip()
         if not person_id:
-            person_id = await self._resolve_person_id(person, allow_name_lookup=allow_name_lookup)
+            person_id = await self._resolve_person_id(person)
         if not person_id:
             if not fallback_name:
                 return None
@@ -1186,131 +1148,6 @@ class PersonNameAliasPlugin(MaiBotPlugin):
         except Exception as exc:
             self._log_warning(f"注入人物称呼与别名失败，已跳过: {exc}")
             return {"action": "continue"}
-
-    # ---------------------------------------------------------------- 工具
-
-    @Tool(
-        "person_name_alias_lookup",
-        description="按 QQ 号查询某个人的称呼与别名（含 WebUI 维护的人工别名），用于核对注入内容",
-        parameters=[
-            ToolParameterInfo(
-                name="user_id",
-                param_type=ToolParamType.STRING,
-                description="平台用户 ID（QQ 号）或 person_id（32 位十六进制）",
-                required=True,
-            ),
-            ToolParameterInfo(
-                name="platform",
-                param_type=ToolParamType.STRING,
-                description="平台名，默认 qq",
-                required=False,
-                default="qq",
-            ),
-        ],
-    )
-    async def handle_lookup_person_alias(
-        self,
-        user_id: str = "",
-        platform: str = "qq",
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """按 QQ 号查询人物称呼与别名。"""
-
-        del kwargs
-
-        token = str(user_id or "").strip()
-        if not token:
-            return {"name": "person_name_alias_lookup", "content": "请提供 QQ 号（或 person_id）"}
-
-        try:
-            if self._looks_like_person_id(token):
-                person = {"person_id": token}
-            elif token.isdigit():
-                person = {"platform": str(platform or "qq").strip(), "user_id": token}
-            elif self._allow_name_lookup():
-                person = {"platform": "", "user_id": "", "name": token}
-            else:
-                return {
-                    "name": "person_name_alias_lookup",
-                    "content": "请提供 QQ 号（纯数字）或 person_id（32 位十六进制）。"
-                    "按名称查询需先在插件配置里开启「允许按名称反查身份」",
-                }
-
-            entry = await self._describe_person(person)
-            if entry is None:
-                return {"name": "person_name_alias_lookup", "content": f"未找到人物：{token}"}
-
-            aliases = [str(item) for item in entry.get("aliases") or []]
-            lines = [
-                f"称呼: {entry.get('name', '')}",
-                f"别名: {'、'.join(aliases) if aliases else '（无）'}",
-                f"person_id: {entry.get('person_id', '') or '（未解析）'}",
-            ]
-            manual = await self._load_manual_aliases() if bool(self._opt("manual_alias", "use_manual_aliases", True)) else {}
-            if manual:
-                person_id = str(entry.get("person_id") or "")
-                override = manual.get(person_id)
-                lines.append(f"人工覆盖: {'、'.join(override) if override else '（无）'}")
-            return {"name": "person_name_alias_lookup", "content": "\n".join(lines)}
-        except Exception as exc:
-            return {"name": "person_name_alias_lookup", "content": f"查询失败: {exc}"}
-
-
-    @Tool(
-        "person_name_replace_lookup",
-        description="查询某个用户在运行时会被替换成什么称呼，用于核对昵称替换是否生效",
-        parameters=[
-            ToolParameterInfo(
-                name="user_id",
-                param_type=ToolParamType.STRING,
-                description="平台用户 ID（QQ 号）",
-                required=True,
-            ),
-            ToolParameterInfo(
-                name="platform",
-                param_type=ToolParamType.STRING,
-                description="平台名，默认 qq",
-                required=False,
-                default="qq",
-            ),
-            ToolParameterInfo(
-                name="current_name",
-                param_type=ToolParamType.STRING,
-                description="当前 QQ 昵称或群名片（可选，用于判断是否需要替换）",
-                required=False,
-                default="",
-            ),
-        ],
-    )
-    async def handle_lookup_replace(
-        self,
-        user_id: str = "",
-        platform: str = "qq",
-        current_name: str = "",
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """查询运行时会显示成什么名字。"""
-
-        del kwargs
-
-        token = str(user_id or "").strip()
-        if not token:
-            return {"name": "person_name_replace_lookup", "content": "请提供 user_id（QQ 号）"}
-
-        try:
-            new_name = await self._resolve_display_name(str(platform or "qq").strip(), token, current_name)
-            lines = [
-                f"平台: {str(platform or 'qq').strip()}",
-                f"用户ID: {token}",
-                f"当前显示名: {str(current_name or '').strip() or '（未提供）'}",
-                f"替换为: {new_name or '（不替换，保持原样）'}",
-                f"生效范围: {self._name_replace_scope()} / 名字来源: "
-                f"{self._name_replace_source()}",
-            ]
-            return {"name": "person_name_replace_lookup", "content": "\n".join(lines)}
-        except Exception as exc:
-            return {"name": "person_name_replace_lookup", "content": f"查询失败: {exc}"}
-
 
 def create_plugin() -> PersonNameAliasPlugin:
     """创建插件实例。"""

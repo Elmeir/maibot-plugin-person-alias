@@ -52,20 +52,9 @@ git clone https://github.com/Elmeir/maibot-plugin-person-alias.git
 
 **一律用 `platform + user_id`（QQ 号）解析人物身份**，拿不到 QQ 号就保持原样、绝不猜人。
 
-为什么不用名字：`person.get_id_by_name` 底层是按人物主档案 `person_name` 精确匹配，而插件手里的“名字”通常是**群名片**（其次 QQ 昵称）。群名片由本人随意修改，改成别人的名字就会被认成别人，替换名字时会改错对象。
-
-如果你确实遇到拿不到 QQ 号的平台，可以开启配置「允许按名称反查身份（不推荐）」（默认关闭），此时才会在无 QQ 号时按名称兜底。
+为什么不用名字：`person.get_id_by_name` 底层是按人物主档案 `person_name` 精确匹配，而插件手里的“名字”通常是**群名片**（其次 QQ 昵称）。群名片由本人随意修改，改成别人的名字就会被认成别人，替换名字时会改错对象。因此插件**没有任何按名称兜底的路径**，拿不到 QQ 号就保持原样。
 
 > 别名列表里仍然包含群名片，但那是「已按 QQ 号确定身份之后」的名称变体，只描述“这个人有哪些叫法”，不参与身份判定。
-
-## 两个核对工具
-
-| 工具 | 参数 | 用途 |
-|---|---|---|
-| `person_name_replace_lookup` | `user_id`(QQ号) / `platform` / `current_name` | 核对某个 QQ 号运行时会显示成什么称呼 |
-| `person_name_alias_lookup` | `user_id`(QQ号 或 person_id) / `platform` | 核对某个人的称呼与别名（含人工别名） |
-
-`person_name_alias_lookup` 传名称会被拒绝并提示改用 QQ 号（除非开启了按名称反查）。例如：对话里问「查一下 123456789 的称呼和别名」。
 
 ## 本地自检
 

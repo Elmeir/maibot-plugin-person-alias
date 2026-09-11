@@ -128,7 +128,7 @@ try:
         ],
         str(hooks),
     )
-    check("声明了查询工具", sorted(tools) == ["person_name_alias_lookup", "person_name_replace_lookup"], str(tools))
+    check("未注册 Tool（核心功能全走钩子，1.4.2 起精简）", tools == [], str(tools))
     check("配置模型可生成默认配置", module.PersonNameAliasConfig.__name__ == "PersonNameAliasConfig")
 
     # 校验配置 schema 可生成（WebUI 面板依赖它）
@@ -472,27 +472,20 @@ try:
             debug=module.DebugConfig(log_injection=True),
         )
 
-        lookup = asyncio.run(plugin.handle_lookup_person_alias(user_id="1002"))
+        entry = asyncio.run(plugin._describe_person({"platform": "qq", "user_id": "1002"}))  # noqa: SLF001
         check(
-            "查询工具按 QQ 号返回称呼/别名",
-            "称呼: 李四" in str(lookup.get("content", "")),
-            str(lookup.get("content", "")).replace("\n", " | "),
+            "按 QQ 号解析出称呼/别名（原查询工具的核心路径）",
+            entry is not None and entry.get("name") == "李四",
+            str(entry),
         )
-        lookup_by_id = asyncio.run(plugin.handle_lookup_person_alias(user_id="0123456789abcdef0123456789abcdef"))
+        entry_by_id = asyncio.run(
+            plugin._describe_person({"person_id": "0123456789abcdef0123456789abcdef"})  # noqa: SLF001
+        )
         check(
-            "查询工具也接受 person_id（32 位十六进制）",
-            "称呼: 赵六" in str(lookup_by_id.get("content", "")),
-            str(lookup_by_id.get("content", "")).replace("\n", " | "),
+            "person_id（32 位十六进制）直接命中",
+            entry_by_id is not None and entry_by_id.get("name") == "赵六",
+            str(entry_by_id),
         )
-        rejected = str(asyncio.run(plugin.handle_lookup_person_alias(user_id="小张")).get("content", ""))
-        check(
-            "拿名称当身份查询会被拒绝并提示改用 QQ 号",
-            "请提供 QQ 号" in rejected,
-            rejected,
-        )
-        check("按名称查身份已被拒绝（默认只认 QQ 号）", "请提供 QQ 号" in str(
-            asyncio.run(plugin.handle_lookup_person_alias()).get("content", "")
-        ))
 
         # 身份解析：默认不得按名称反查
         name_calls: list[str] = []
@@ -505,19 +498,9 @@ try:
         plugin._ctx = types.SimpleNamespace(person=TracingPerson(), config=FakeConfig(), logger=FakeLogger())  # noqa: SLF001
         by_name = asyncio.run(plugin._resolve_person_id({"platform": "", "user_id": "", "name": "小张"}))  # noqa: SLF001
         check(
-            "拿不到 QQ 号时默认不按群名片/昵称猜人",
+            "拿不到 QQ 号时不按群名片/昵称猜人（无名称兜底路径）",
             by_name == "" and name_calls == [],
             f"person_id={by_name!r} 反查调用={name_calls}",
-        )
-        plugin._plugin_config_instance = module.PersonNameAliasConfig(  # noqa: SLF001
-            injection=module.InjectionConfig(allow_name_lookup=True),
-            manual_alias=module.ManualAliasConfig(metadata_db_path=str(db_path)),
-        )
-        by_name_allowed = asyncio.run(plugin._resolve_person_id({"platform": "", "user_id": "", "name": "小张"}))  # noqa: SLF001
-        check(
-            "显式开启后才允许按名称反查（仅限查询用途）",
-            by_name_allowed == "pid-by-name" and name_calls == ["小张"],
-            f"person_id={by_name_allowed!r} 反查调用={name_calls}",
         )
         plugin._plugin_config_instance = module.PersonNameAliasConfig(  # noqa: SLF001
             injection=module.InjectionConfig(max_people=3),

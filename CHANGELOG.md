@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.2] - 2026-09-11
+
+### 精简：移除 LLM 查询工具
+
+- 移除 `person_name_alias_lookup` / `person_name_replace_lookup` 两个 Tool：核心功能
+  （注入 + 换名）完全由钩子实现，这两个工具只是部署期的核对辅助，且给 LLM 开了
+  查询任意已建档人物数据的入口——非必要不注册。核对改走 `verify_plugin.py`
+  本地自检与运行日志。
+- 随工具一并移除「允许按名称反查身份」配置与按名称猜人的代码路径（原本只服务于
+  工具查询），身份解析严格只认 platform + user_id，无任何名称兜底。
+  config_version 不变：旧 config.toml 里残留的 `allow_name_lookup` 键会被忽略，可手动删除。
+- manifest 版本升 1.4.2。
+
 ## [1.4.1] - 2026-09-11
 
 ### 规范符合性修复
