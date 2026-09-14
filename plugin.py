@@ -835,8 +835,13 @@ class PersonNameAliasPlugin(MaiBotPlugin):
 
         return ""
 
-    async def _describe_person(self, person: dict[str, str]) -> dict[str, Any] | None:
+    async def _describe_person(self, person: dict[str, str], seen: str = "") -> dict[str, Any] | None:
         """汇总单个人物的称呼与别名。
+
+        返回的 ``name`` 是 **planner 实际可见的名字**（优先取换名后的名字
+        ``seen``，未换名时是消息里的原始名）——注入块以它为主语，保证块内
+        名字与 planner 在消息里看到的一致；``aliases`` 是除此之外的全部
+        已知叫法（档案主称呼、档案昵称、各群群名片、人工别名）。
 
         传入 `person["person_id"]` 时直接使用，不再做任何反查。
         """
@@ -845,62 +850,54 @@ class PersonNameAliasPlugin(MaiBotPlugin):
         person_id = str(person.get("person_id") or "").strip()
         if not person_id:
             person_id = await self._resolve_person_id(person)
-        if not person_id:
-            if not fallback_name:
-                return None
-            return {"person_id": "", "name": fallback_name, "original": fallback_name, "aliases": []}
 
-        if not bool(await self._person_field(person_id, "is_known")):
-            # 未进入人物档案（person_name 会是「未知用户xxxx」占位），退回消息里的原始称呼
-            if not fallback_name:
-                return None
-            return {"person_id": "", "name": fallback_name, "original": fallback_name, "aliases": []}
+        known = bool(person_id) and bool(await self._person_field(person_id, "is_known"))
+        person_name = ""
+        nickname = ""
+        group_cards: list[str] = []
+        manual: list[str] = []
+        if known:
+            person_name = str(await self._person_field(person_id, "person_name") or "").strip()
+            if person_name.startswith("未知用户"):
+                person_name = ""
+            nickname = str(await self._person_field(person_id, "nickname") or "").strip()
+            group_cards = self._extract_group_cardnames(await self._person_field(person_id, "group_cardname_list"))
+            if bool(self._opt("manual_alias", "use_manual_aliases", True)):
+                manual_map = await self._load_manual_aliases()
+                manual = manual_map.get(person_id, [])
 
-        person_name = str(await self._person_field(person_id, "person_name") or "").strip()
-        if person_name.startswith("未知用户"):
-            person_name = ""
-        nickname = str(await self._person_field(person_id, "nickname") or "").strip()
-        display_name = person_name or nickname or fallback_name or person_id
+        # 主语：planner 实际可见名 > 档案主称呼 > 档案昵称 > 原始名 > person_id
+        seen = str(seen or "").strip() or fallback_name
+        name = seen or person_name or nickname or person_id
+        if not name:
+            return None
 
-        aliases: list[str] = [person_name, nickname]
-        aliases.extend(self._extract_group_cardnames(await self._person_field(person_id, "group_cardname_list")))
-
-        if bool(self._opt("manual_alias", "use_manual_aliases", True)):
-            manual = await self._load_manual_aliases()
-            aliases.extend(manual.get(person_id, []))
-
-        deduped: list[str] = []
-        seen = {display_name.casefold()}
-        for alias in aliases:
-            text = str(alias or "").strip()
+        aliases: list[str] = []
+        seen_key = name.casefold()
+        for candidate in (person_name, nickname, *group_cards, *manual):
+            text = str(candidate or "").strip()
             key = text.casefold()
-            if not text or key in seen:
+            if not text or key == seen_key:
                 continue
-            seen.add(key)
-            deduped.append(text)
+            if key in {a.casefold() for a in aliases}:
+                continue
+            aliases.append(text)
 
-        return {"person_id": person_id, "name": display_name, "original": fallback_name, "aliases": deduped}
+        return {"person_id": person_id, "name": name, "aliases": aliases}
 
     @staticmethod
-    def _entry_informative(entry: dict[str, Any], include_aliases: bool, replaced: bool = False) -> bool:
-        """判断条目是否携带新信息，滤掉零信息量的占位注入。
+    def _entry_informative(entry: dict[str, Any], include_aliases: bool) -> bool:
+        """判断条目是否值得注入。
 
-        判据是"与 planner 实际看到的名字相比有没有增量"：
-
-        - 换名生效（``replaced``）时 planner 看到的已是画像称呼本身 → 纯称呼
-          条目零增量，只有别名对照（消息、记忆、知识库原文里出现的旧称）才有价值；
-        - 换名未生效时 planner 看到的是消息里的原始名 → 称呼与原名不同才有价值。
+        主语就是 planner 实际可见的名字，块内唯一能提供的新信息是"这个人
+        还有哪些叫法"——没有其他叫法（或别名注入关闭）时，任何注入都是
+        零增量。
         """
 
+        if not include_aliases:
+            return False
         name = str(entry.get("name") or "").strip()
-        if not name:
-            return False
-        if include_aliases and entry.get("aliases"):
-            return True
-        if replaced:
-            return False
-        original = str(entry.get("original") or "").strip()
-        return bool(original) and name.casefold() != original.casefold()
+        return bool(name) and bool(entry.get("aliases"))
 
     @staticmethod
     def _extract_group_cardnames(raw_value: Any) -> list[str]:
@@ -995,11 +992,14 @@ class PersonNameAliasPlugin(MaiBotPlugin):
     # ------------------------------------------------------------ 注入实现
 
     def _build_reference_text(self, entries: list[dict[str, Any]]) -> str:
-        """拼装内部参考文本。"""
+        """拼装内部参考文本。
+
+        每行主语是 planner 实际可见的名字，后面列这个人其余的全部叫法；
+        不再有恒等的"称呼=主语"字段。
+        """
 
         title = str(self._opt("injection", "title", "") or "").strip() or "【人物称呼与别名-内部参考】"
         footer = str(self._opt("injection", "footer", "") or "").strip()
-        include_aliases = bool(self._opt("injection", "include_aliases", True))
 
         lines = [title]
         for entry in entries:
@@ -1007,10 +1007,10 @@ class PersonNameAliasPlugin(MaiBotPlugin):
             if not name:
                 continue
             aliases = [str(item) for item in entry.get("aliases") or [] if str(item).strip()]
-            if include_aliases and aliases:
-                lines.append(f"{name}：称呼={name}；别名={'、'.join(aliases)}")
+            if aliases:
+                lines.append(f"{name}：别名={'、'.join(aliases)}")
             else:
-                lines.append(f"{name}：称呼={name}")
+                lines.append(name)
         if len(lines) == 1:
             return ""
         if footer:
@@ -1160,18 +1160,19 @@ class PersonNameAliasPlugin(MaiBotPlugin):
             # 2) 注入人物称呼与别名内部参考（injection.enabled 独立开关，与昵称替换解耦）
             if bool(self._opt("injection", "enabled", True)):
                 include_aliases = bool(self._opt("injection", "include_aliases", True))
+                replace_enabled = self._name_replace_enabled()
                 people = self._pick_people(session_id)
                 if people:
                     max_people = max(1, min(MAX_RECORDED_PEOPLE, int(self._opt("injection", "max_people", 3))))
                     entries: list[dict[str, Any]] = []
                     for person in people[:max_people]:
-                        entry = await self._describe_person(person)
-                        # planner 是否已看到该人物的新称呼：换名开关开启且本条记录命中替换。
-                        # 双重判断防止配置切换后 _recent 里的旧 replace 值以旧语义参与判定。
-                        replaced = bool(self._name_replace_enabled()) and bool(
-                            str(person.get("replace") or "").strip()
-                        )
-                        if entry is not None and self._entry_informative(entry, include_aliases, replaced):
+                        # 主语 = planner 实际可见名：换名生效用换名后的名字，否则用原始名
+                        replace_value = str(person.get("replace") or "").strip()
+                        seen = replace_value if (replace_enabled and replace_value) else str(
+                            person.get("name") or ""
+                        ).strip()
+                        entry = await self._describe_person(person, seen=seen)
+                        if entry is not None and self._entry_informative(entry, include_aliases):
                             entries.append(entry)
 
                     text = self._build_reference_text(entries)
