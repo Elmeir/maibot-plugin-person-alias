@@ -202,10 +202,18 @@ class InjectionConfig(PluginConfigBase):
         description="每轮最多注入几个人物",
         json_schema_extra=_ui_meta("每轮最多注入人数", f"1~{MAX_RECORDED_PEOPLE}，按最近发言顺序取前几位"),
     )
+    enabled: bool = Field(
+        default=True,
+        description="启用注入（关闭后不注入人物参考块，昵称替换不受影响）",
+        json_schema_extra=_ui_meta("启用注入", "关闭后不再向 planner 注入人物称呼参考块；昵称替换开关独立生效"),
+    )
     include_aliases: bool = Field(
         default=True,
         description="是否注入别名（关闭则只注入称呼）",
-        json_schema_extra=_ui_meta("注入别名", "关闭后只注入称呼，别名不参与"),
+        json_schema_extra=_ui_meta(
+            "注入别名",
+            "关闭后只注入称呼；称呼与消息里的原名相同、且无别名可注入的人物不再注入（避免零信息量的占位块）",
+        ),
     )
     watch_window_seconds: int = Field(
         default=300,
@@ -835,13 +843,13 @@ class PersonNameAliasPlugin(MaiBotPlugin):
         if not person_id:
             if not fallback_name:
                 return None
-            return {"person_id": "", "name": fallback_name, "aliases": []}
+            return {"person_id": "", "name": fallback_name, "original": fallback_name, "aliases": []}
 
         if not bool(await self._person_field(person_id, "is_known")):
             # 未进入人物档案（person_name 会是「未知用户xxxx」占位），退回消息里的原始称呼
             if not fallback_name:
                 return None
-            return {"person_id": "", "name": fallback_name, "aliases": []}
+            return {"person_id": "", "name": fallback_name, "original": fallback_name, "aliases": []}
 
         person_name = str(await self._person_field(person_id, "person_name") or "").strip()
         if person_name.startswith("未知用户"):
@@ -866,7 +874,24 @@ class PersonNameAliasPlugin(MaiBotPlugin):
             seen.add(key)
             deduped.append(text)
 
-        return {"person_id": person_id, "name": display_name, "aliases": deduped}
+        return {"person_id": person_id, "name": display_name, "original": fallback_name, "aliases": deduped}
+
+    @staticmethod
+    def _entry_informative(entry: dict[str, Any], include_aliases: bool) -> bool:
+        """判断条目是否携带新信息，滤掉零信息量的占位注入。
+
+        消息文本里本来就显示着发送者的原始称呼——若画像称呼与它相同、又没有
+        别名可注入（别名关闭或为空），注入"X：称呼=X"对模型毫无增量，还会
+        平白占用上下文。
+        """
+
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            return False
+        if include_aliases and entry.get("aliases"):
+            return True
+        original = str(entry.get("original") or "").strip()
+        return bool(original) and name.casefold() != original.casefold()
 
     @staticmethod
     def _extract_group_cardnames(raw_value: Any) -> list[str]:
@@ -1123,24 +1148,26 @@ class PersonNameAliasPlugin(MaiBotPlugin):
                 if renamed and bool(self._opt("debug", "log_replace", False)):
                     self._log_info(f"已在 planner 请求中替换称呼: {rename_map}")
 
-            # 2) 注入人物称呼与别名内部参考
-            people = self._pick_people(session_id)
-            if people:
-                max_people = max(1, min(MAX_RECORDED_PEOPLE, int(self._opt("injection", "max_people", 3))))
-                entries: list[dict[str, Any]] = []
-                for person in people[:max_people]:
-                    entry = await self._describe_person(person)
-                    if entry is not None:
-                        entries.append(entry)
+            # 2) 注入人物称呼与别名内部参考（injection.enabled 独立开关，与昵称替换解耦）
+            if bool(self._opt("injection", "enabled", True)):
+                include_aliases = bool(self._opt("injection", "include_aliases", True))
+                people = self._pick_people(session_id)
+                if people:
+                    max_people = max(1, min(MAX_RECORDED_PEOPLE, int(self._opt("injection", "max_people", 3))))
+                    entries: list[dict[str, Any]] = []
+                    for person in people[:max_people]:
+                        entry = await self._describe_person(person)
+                        if entry is not None and self._entry_informative(entry, include_aliases):
+                            entries.append(entry)
 
-                text = self._build_reference_text(entries)
-                if text:
-                    new_items = self._insert_reference_item(working_items, text)
-                    if new_items is not None:
-                        working_items = new_items
-                        changed = True
-                        if bool(self._opt("debug", "log_injection", False)):
-                            self._log_info(f"已注入人物称呼与别名（{len(entries)} 人）:\n{text}")
+                    text = self._build_reference_text(entries)
+                    if text:
+                        new_items = self._insert_reference_item(working_items, text)
+                        if new_items is not None:
+                            working_items = new_items
+                            changed = True
+                            if bool(self._opt("debug", "log_injection", False)):
+                                self._log_info(f"已注入人物称呼与别名（{len(entries)} 人）:\n{text}")
 
             if not changed:
                 return {"action": "continue"}
