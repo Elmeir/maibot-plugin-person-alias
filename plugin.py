@@ -445,9 +445,14 @@ class PersonNameAliasPlugin(MaiBotPlugin):
         self._log_info("人物称呼与别名注入插件已卸载")
 
     async def on_config_update(self, scope: str, config_data: dict[str, Any], version: str) -> None:
-        """配置热重载。"""
+        """配置热重载。Runner 在通知前已自行应用新配置，这里只需清各类缓存。
+
+        ``_recent`` 一并清空：里面记录的 ``replace`` 字段是旧配置下算出的，
+        切换换名开关后最长 5 分钟内会以旧语义参与注入判定。
+        """
 
         del scope, config_data, version
+        self._recent.clear()
         self._person_cache.clear()
         self._person_id_cache.clear()
         self._manual_cache = {"ts": 0.0, "data": None, "path": None}
@@ -877,12 +882,14 @@ class PersonNameAliasPlugin(MaiBotPlugin):
         return {"person_id": person_id, "name": display_name, "original": fallback_name, "aliases": deduped}
 
     @staticmethod
-    def _entry_informative(entry: dict[str, Any], include_aliases: bool) -> bool:
+    def _entry_informative(entry: dict[str, Any], include_aliases: bool, replaced: bool = False) -> bool:
         """判断条目是否携带新信息，滤掉零信息量的占位注入。
 
-        消息文本里本来就显示着发送者的原始称呼——若画像称呼与它相同、又没有
-        别名可注入（别名关闭或为空），注入"X：称呼=X"对模型毫无增量，还会
-        平白占用上下文。
+        判据是"与 planner 实际看到的名字相比有没有增量"：
+
+        - 换名生效（``replaced``）时 planner 看到的已是画像称呼本身 → 纯称呼
+          条目零增量，只有别名对照（消息、记忆、知识库原文里出现的旧称）才有价值；
+        - 换名未生效时 planner 看到的是消息里的原始名 → 称呼与原名不同才有价值。
         """
 
         name = str(entry.get("name") or "").strip()
@@ -890,6 +897,8 @@ class PersonNameAliasPlugin(MaiBotPlugin):
             return False
         if include_aliases and entry.get("aliases"):
             return True
+        if replaced:
+            return False
         original = str(entry.get("original") or "").strip()
         return bool(original) and name.casefold() != original.casefold()
 
@@ -1157,7 +1166,12 @@ class PersonNameAliasPlugin(MaiBotPlugin):
                     entries: list[dict[str, Any]] = []
                     for person in people[:max_people]:
                         entry = await self._describe_person(person)
-                        if entry is not None and self._entry_informative(entry, include_aliases):
+                        # planner 是否已看到该人物的新称呼：换名开关开启且本条记录命中替换。
+                        # 双重判断防止配置切换后 _recent 里的旧 replace 值以旧语义参与判定。
+                        replaced = bool(self._name_replace_enabled()) and bool(
+                            str(person.get("replace") or "").strip()
+                        )
+                        if entry is not None and self._entry_informative(entry, include_aliases, replaced):
                             entries.append(entry)
 
                     text = self._build_reference_text(entries)

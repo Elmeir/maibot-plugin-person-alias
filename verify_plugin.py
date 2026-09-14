@@ -531,22 +531,40 @@ try:
         )
         check("注入开关关闭后不注入", "modified_kwargs" not in injection_off, str(injection_off))
 
-        # 关闭别名：称呼与原名不同的人物仍注入称呼（不带别名），相同的不注入
+        # 关闭别名 + 换名开启（默认）：planner 看到的已是新称呼，纯称呼条目零增量 → 整体跳过
         plugin._plugin_config_instance = module.PersonNameAliasConfig(  # noqa: SLF001
             injection=module.InjectionConfig(max_people=3, include_aliases=False),
             manual_alias=module.ManualAliasConfig(metadata_db_path=str(db_path)),
         )
         alias_off_result = asyncio.run(
+            plugin.handle_planner_before_request(items=[dict(existing_item)], session_id="group_123")
+        )
+        check(
+            "关闭别名且换名开启时不注入零增量称呼块",
+            "modified_kwargs" not in alias_off_result,
+            str(alias_off_result),
+        )
+
+        # 关闭别名 + 换名关闭：planner 看到的仍是原群名片 → 注入称呼对照（无别名字样）
+        plugin._plugin_config_instance = module.PersonNameAliasConfig(  # noqa: SLF001
+            injection=module.InjectionConfig(max_people=3, include_aliases=False),
+            name_replace=module.NameReplaceConfig(enabled=False),
+            manual_alias=module.ManualAliasConfig(metadata_db_path=str(db_path)),
+        )
+        alias_off_no_replace = asyncio.run(
             plugin.handle_planner_before_request(
                 hook_name="maisaka.planner.before_request",
                 items=[dict(existing_item), dict(tail_item)],
                 session_id="group_123",
             )
         )
-        alias_off_text = str(alias_off_result["modified_kwargs"]["items"][1]["parts"][0]["text"])
-        check("关闭别名后注入块无别名字样", "别名=" not in alias_off_text, alias_off_text.replace("\n", " | "))
-        check("关闭别名后称呼与原名不同的人物仍注入", "张三：称呼=张三" in alias_off_text, alias_off_text)
-        check("关闭别名后零信息量人物仍不注入", "李四：" not in alias_off_text, alias_off_text)
+        no_replace_text = str(alias_off_no_replace["modified_kwargs"]["items"][1]["parts"][0]["text"])
+        check(
+            "换名关闭时注入称呼对照（张三，无别名字样）",
+            "张三：称呼=张三" in no_replace_text and "别名=" not in no_replace_text,
+            no_replace_text.replace("\n", " | "),
+        )
+        check("换名关闭时零信息量人物仍不注入", "李四：" not in no_replace_text, no_replace_text)
 
         # 无信息量过滤的判定逻辑（含用户报告场景：群豆包：称呼=群豆包）
         informative = module.PersonNameAliasPlugin._entry_informative  # noqa: SLF001
@@ -554,7 +572,8 @@ try:
             "零信息量条目过滤判定",
             not informative({"name": "群豆包", "original": "群豆包", "aliases": []}, True)
             and not informative({"name": "群豆包", "original": "群豆包", "aliases": ["豆包"]}, False)
-            and informative({"name": "豆包哥", "original": "群豆包", "aliases": []}, False)
+            and informative({"name": "豆包哥", "original": "群豆包", "aliases": []}, False, replaced=False)
+            and not informative({"name": "豆包哥", "original": "群豆包", "aliases": []}, False, replaced=True)
             and informative({"name": "群豆包", "original": "群豆包", "aliases": ["豆包"]}, True),
         )
 except Exception as exc:  # noqa: BLE001
