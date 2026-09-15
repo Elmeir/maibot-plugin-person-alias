@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 config.toml
 .DS_Store
+# 开发侧自检脚本（非运行时，不入库）
+verify_plugin.py
